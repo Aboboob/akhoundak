@@ -614,22 +614,30 @@ function updateWhip(dt) {
   const active = currentWeapon === 'whip' && !freeMode;
   const hitPos = new THREE.Vector3(char.pos.x, char.pos.y + 1.4, char.pos.z);
 
-  // نوک شلاق را مستقیم به سمت آخوند بکش (قابل اطمینان)
+  // شلاق قابل کنترل با موس/دوربین (مثل نسخه اصلی)
+  // نوک دنبال جهت نگاه است، نه دنبال آخوند
   let tipTarget;
   if (active) {
-    // از دوربین به سمت آخوند، با طول مناسب
-    const toChar = hitPos.clone().sub(camera.position);
-    const dist = toChar.length();
-    const reach = Math.min(Math.max(dist * 0.92, 4), 11);
-    tipTarget = camera.position.clone().add(toChar.normalize().multiplyScalar(reach));
-    tipTarget.y = Math.max(0.4, Math.min(tipTarget.y, hitPos.y + 0.8));
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+
+    // پرتاب نوک به جلو در جهت نگاه
+    const reach = 8.5;
+    tipTarget = camera.position.clone().addScaledVector(dir, reach);
+
+    // تأثیر نقطه موس روی زمین برای کنترل دقیق‌تر
+    const clickAim = lastClickPos.clone();
+    clickAim.y = Math.max(0.5, Math.min(clickAim.y + 1.0, 4.5));
+    tipTarget.lerp(clickAim, 0.45);
+
+    tipTarget.y = Math.max(0.35, Math.min(tipTarget.y, 5.5));
   } else {
     tipTarget = camera.position.clone();
-    tipTarget.y = 0.4;
+    tipTarget.y = 0.35;
   }
 
-  // نوک سریع‌تر دنبال هدف برود
-  whipPoints[0].lerp(tipTarget, active ? 0.65 : 0.25);
+  // حرکت نرم نوک
+  whipPoints[0].lerp(tipTarget, active ? 0.42 : 0.2);
 
   // زنجیره شلاق
   for (let i = 1; i < 12; i++) {
@@ -637,10 +645,10 @@ function updateWhip(dt) {
     const curr = whipPoints[i];
     const diff = curr.clone().sub(prev);
     const len = diff.length() || 0.001;
-    const segLen = 0.48;
+    const segLen = 0.50;
     diff.multiplyScalar(segLen / len);
     curr.copy(prev).add(diff);
-    curr.y -= 0.9 * dt;
+    curr.y -= 1.0 * dt;
     if (curr.y < 0.1) curr.y = 0.1;
   }
 
@@ -649,13 +657,13 @@ function updateWhip(dt) {
     whipMeshes[i].visible = active;
   }
 
-  // برخورد شلاق — شعاع بزرگ‌تر تا راحت‌تر بخورد
+  // فقط وقتی بازیکن شلاق را روی آخوند گرفته باشد می‌زند
   if (active) {
     const tip = whipPoints[0];
     const dx = tip.x - hitPos.x;
     const dy = tip.y - hitPos.y;
     const dz = tip.z - hitPos.z;
-    if (dx * dx + dy * dy + dz * dz < (char.radius + 1.1) * (char.radius + 1.1)) {
+    if (dx * dx + dy * dy + dz * dz < (char.radius + 0.9) * (char.radius + 0.9)) {
       hitChar('whip');
     }
   }
@@ -732,7 +740,8 @@ function updateCamera(dt){
 window.addEventListener('mousemove', e => {
   mouse.x = (e.clientX / innerWidth) * 2 - 1;
   mouse.y = -(e.clientY / innerHeight) * 2 + 1;
-  if (shooting) lastClickPos.copy(getClickWorldPosition(e.clientX, e.clientY));
+  // همیشه نقطه موس را برای شلاق و فرار آپدیت کن
+  lastClickPos.copy(getClickWorldPosition(e.clientX, e.clientY));
 });
 window.addEventListener('mousedown', e => {
   if (e.target.closest('.wpn') || e.target.closest('#modeBtn') || e.target.closest('#joystick')) return;
@@ -766,7 +775,8 @@ window.addEventListener('touchmove', e => {
   const t = e.touches[0];
   mouse.x = (t.clientX / innerWidth) * 2 - 1;
   mouse.y = -(t.clientY / innerHeight) * 2 + 1;
-  if (shooting) lastClickPos.copy(getClickWorldPosition(t.clientX, t.clientY));
+  // همیشه برای شلاق و فرار
+  lastClickPos.copy(getClickWorldPosition(t.clientX, t.clientY));
 }, { passive: false });
 window.addEventListener('touchend', () => { shooting = false; });
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
