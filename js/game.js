@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { WEAPONS, getWeapon, createProjectileMesh } from './weapons/index.js';
 
 const hitCountEl = document.getElementById('hitCount');
 const scoreEl = document.getElementById('score');
@@ -20,14 +21,6 @@ let currentWeapon='whip', shooting=false, shootTimer=0;
 let mouse={x:0,y:0}, freeMode=false;
 let joy={active:false, dx:0, dy:0}; // -1..1
 
-const WEAPONS=[
-  {id:'whip',name:'شلاق',emoji:'🪢'},{id:'colt',name:'کلت',emoji:'🔫'},
-  {id:'smg',name:'رگبار',emoji:'💥'},{id:'ak',name:'کلاش',emoji:'🔫'},
-  {id:'slipper',name:'دمپایی',emoji:'🩴'},{id:'poop',name:'پیپی',emoji:'💩'},
-  {id:'spear',name:'نیزه',emoji:'🗡️'},{id:'hammer',name:'چکش',emoji:'🔨'},
-  {id:'banana',name:'موز',emoji:'🍌'},{id:'rock',name:'سنگ',emoji:'🪨'},
-  {id:'tomato',name:'گوجه',emoji:'🍅'},{id:'egg',name:'تخم‌مرغ',emoji:'🥚'}
-];
 WEAPONS.forEach(w=>{
   const b=document.createElement('button');
   b.className='wpn'+(w.id==='whip'?' active':'');
@@ -339,20 +332,6 @@ function updatePeds(dt){
 
 // Projectiles & whip
 const projectiles=[], particlePool=[];
-function createProjectileMesh(type){
-  let mesh;
-  if(type==='bullet')mesh=new THREE.Mesh(new THREE.SphereGeometry(0.11,6,6),new THREE.MeshBasicMaterial({color:0xffee44}));
-  else if(type==='slipper')mesh=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.1,0.85),new THREE.MeshStandardMaterial({color:0xe8a060}));
-  else if(type==='poop')mesh=new THREE.Mesh(new THREE.SphereGeometry(0.26,8,6),new THREE.MeshStandardMaterial({color:0x5d4037}));
-  else if(type==='spear'){mesh=new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.035,1.3,6),new THREE.MeshStandardMaterial({color:0x8B4513}));mesh.rotation.z=Math.PI/2;}
-  else if(type==='hammer'){const g=new THREE.Group();g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,0.85,6),new THREE.MeshStandardMaterial({color:0x5a3a1a})));const h=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.25,0.25),new THREE.MeshStandardMaterial({color:0x888888}));h.position.y=0.42;g.add(h);mesh=g;}
-  else if(type==='banana'){mesh=new THREE.Mesh(new THREE.TorusGeometry(0.22,0.08,6,10,Math.PI),new THREE.MeshStandardMaterial({color:0xf5d76e}));mesh.rotation.x=Math.PI/2;}
-  else if(type==='rock')mesh=new THREE.Mesh(new THREE.DodecahedronGeometry(0.26,0),new THREE.MeshStandardMaterial({color:0x6a6a6a,flatShading:true}));
-  else if(type==='tomato')mesh=new THREE.Mesh(new THREE.SphereGeometry(0.26,10,8),new THREE.MeshStandardMaterial({color:0xe53935}));
-  else if(type==='egg'){const geo=new THREE.SphereGeometry(0.2,10,8);geo.scale(1,1.3,1);mesh=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0xf5f0d8}));}
-  else mesh=new THREE.Mesh(new THREE.SphereGeometry(0.14,6,6),new THREE.MeshBasicMaterial({color:0xc9a06a}));
-  mesh.castShadow=true;return mesh;
-}
 const whipPoints=[],whipMeshes=[];
 for(let i=0;i<12;i++){
   const m=new THREE.Mesh(new THREE.SphereGeometry(0.07-i*0.003,6,6),new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(0.08,0.5,0.32-i*0.015)}));
@@ -457,21 +436,42 @@ function updateChar(dt){
 }
 
 function shoot(){
-  const dir=new THREE.Vector3();camera.getWorldDirection(dir);
-  const origin=camera.position.clone().add(dir.clone().multiplyScalar(1.2));
-  const speed=currentWeapon==='smg'?26:currentWeapon==='ak'?30:20;
-  const count=currentWeapon==='smg'?3:currentWeapon==='ak'?2:1;
-  if(['colt','smg','ak'].includes(currentWeapon)){
-    for(let i=0;i<count;i++){
-      const spread=new THREE.Vector3((Math.random()-0.5)*(currentWeapon==='smg'?0.1:0.035),(Math.random()-0.5)*0.05,(Math.random()-0.5)*(currentWeapon==='smg'?0.1:0.035));
-      const d=dir.clone().add(spread).normalize();
-      const mesh=createProjectileMesh('bullet');mesh.position.copy(origin);scene.add(mesh);
-      projectiles.push({type:'bullet',mesh,vel:d.multiplyScalar(speed),life:1.3});
+  const weapon = getWeapon(currentWeapon);
+  if (weapon.isMelee) return;
+
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  const origin = camera.position.clone().add(dir.clone().multiplyScalar(1.2));
+  const speed = weapon.speed;
+  const count = weapon.count || 1;
+
+  if (weapon.projectileType === 'bullet') {
+    for (let i = 0; i < count; i++) {
+      const spread = new THREE.Vector3(
+        (Math.random() - 0.5) * (weapon.spread || 0.035),
+        (Math.random() - 0.5) * 0.05,
+        (Math.random() - 0.5) * (weapon.spread || 0.035)
+      );
+      const d = dir.clone().add(spread).normalize();
+      const mesh = createProjectileMesh('bullet');
+      mesh.position.copy(origin);
+      scene.add(mesh);
+      projectiles.push({ type: currentWeapon, mesh, vel: d.multiplyScalar(speed), life: 1.3 });
     }
-  }else if(currentWeapon!=='whip'){
-    const mesh=createProjectileMesh(currentWeapon);mesh.position.copy(origin);scene.add(mesh);
-    const d=dir.clone();d.y+=0.06;d.normalize();
-    projectiles.push({type:currentWeapon,mesh,vel:d.multiplyScalar(speed*0.65),life:2.1,rotSpeed:(Math.random()-0.5)*7});
+  } else {
+    const mesh = createProjectileMesh(currentWeapon);
+    mesh.position.copy(origin);
+    scene.add(mesh);
+    const d = dir.clone();
+    d.y += 0.06;
+    d.normalize();
+    projectiles.push({
+      type: currentWeapon,
+      mesh,
+      vel: d.multiplyScalar(speed * 0.65),
+      life: 2.1,
+      rotSpeed: (Math.random() - 0.5) * 7
+    });
   }
 }
 
@@ -519,19 +519,42 @@ function updateParticles(dt){
 }
 
 function hitChar(type){
-  const now=performance.now();if(now-lastHit<190)return;lastHit=now;
-  hits++;hitCountEl.textContent=hits;combo++;comboTimer=1.55;
-  comboNumEl.textContent=combo;comboEl.style.opacity=1;
-  const base=(type==='ak'||type==='smg')?26:type==='whip'?9:15;
-  score+=Math.floor(base*Math.min(combo,8));scoreEl.textContent=score;
-  const nl=Math.floor(hits/11)+1;if(nl>level){level=nl;levelEl.textContent=level;showMsg('سطح '+level+'! 🔥');}
+  const now = performance.now();
+  if (now - lastHit < 190) return;
+  lastHit = now;
+
+  const weapon = getWeapon(type);
+
+  hits++;
+  hitCountEl.textContent = hits;
+  combo++;
+  comboTimer = 1.55;
+  comboNumEl.textContent = combo;
+  comboEl.style.opacity = 1;
+
+  const base = weapon.damage || 15;
+  score += Math.floor(base * Math.min(combo, 8));
+  scoreEl.textContent = score;
+
+  const nl = Math.floor(hits / 11) + 1;
+  if (nl > level) {
+    level = nl;
+    levelEl.textContent = level;
+    showMsg('سطح ' + level + '! 🔥');
+  }
   updateTitle();
-  char.hitFlash=1;char.stunTimer=(type==='ak'||type==='smg')?0.65:0.4;
-  char.vel.x+=(Math.random()-0.5)*9;char.vel.z+=(Math.random()-0.5)*9;char.vel.y=4.5+Math.random()*2.5;
-  const msgs={whip:['آخ!','وای پشتم!','شلاق نخور!'],colt:['تیر خوردم!','اسلحه؟!'],smg:['رگباررر!','وای خدا!'],ak:['کلاش؟؟','این دیگه زیادیه!'],slipper:['دمپایی؟ 😂','دمپایی مادر!'],poop:['ییییاک!','گوه؟؟؟'],spear:['نیزه؟!','سوراخ شدم!'],hammer:['چکش روی سرم!','مغزم ترکید!'],banana:['موز؟ 🍌','سُر خوردم!'],rock:['سنگ!','سرم شکست!'],tomato:['گوجه؟ 🍅'],egg:['تخم‌مرغ؟!','زرده پاشید!']};
-  const list=msgs[type]||['آخ!'];showMsg(list[Math.floor(Math.random()*list.length)]);
-  const col=type==='poop'?0x5d4037:type==='tomato'?0xe53935:type==='egg'?0xf5f0d8:0xff6644;
-  spawnParticles(char.pos.clone().add(new THREE.Vector3(0,1.7,0)),col,12+Math.min(combo,7));
+
+  char.hitFlash = 1;
+  char.stunTimer = weapon.stunTime || 0.4;
+  char.vel.x += (Math.random() - 0.5) * 9;
+  char.vel.z += (Math.random() - 0.5) * 9;
+  char.vel.y = 4.5 + Math.random() * 2.5;
+
+  const list = weapon.messages || ['آخ!'];
+  showMsg(list[Math.floor(Math.random() * list.length)]);
+
+  const col = weapon.particleColor || 0xff6644;
+  spawnParticles(char.pos.clone().add(new THREE.Vector3(0, 1.7, 0)), col, 12 + Math.min(combo, 7));
 }
 
 function showMsg(txt){
@@ -557,14 +580,15 @@ function updateCamera(dt){
 window.addEventListener('mousemove',e=>{mouse.x=(e.clientX/innerWidth)*2-1;mouse.y=-(e.clientY/innerHeight)*2+1;});
 window.addEventListener('mousedown',e=>{
   if(e.target.closest('.wpn')||e.target.closest('#modeBtn')||e.target.closest('#joystick'))return;
-  shooting=true;if(currentWeapon!=='whip')shoot();
+  shooting=true;
+  if(!getWeapon(currentWeapon).isMelee) shoot();
 });
 window.addEventListener('mouseup',()=>{shooting=false;});
 window.addEventListener('touchstart',e=>{
   if(e.target.closest('.wpn')||e.target.closest('#modeBtn')||e.target.closest('#joystick'))return;
   e.preventDefault();shooting=true;
   const t=e.touches[0];mouse.x=(t.clientX/innerWidth)*2-1;mouse.y=-(t.clientY/innerHeight)*2+1;
-  if(currentWeapon!=='whip')shoot();
+  if(!getWeapon(currentWeapon).isMelee) shoot();
 },{passive:false});
 window.addEventListener('touchmove',e=>{
   if(e.target.closest('#joystick'))return;
@@ -581,9 +605,13 @@ function animate(){
   if(comboTimer>0){comboTimer-=dt;if(comboTimer<=0){combo=0;comboEl.style.opacity=0;}}
   updateChar(dt);updateNpcs(dt);updatePeds(dt);
   updateProjectiles(dt);updateWhip(dt);updateParticles(dt);updateCamera(dt);
-  if(shooting&&currentWeapon!=='whip'){
+  if(shooting && !getWeapon(currentWeapon).isMelee){
     shootTimer-=dt;
-    if(shootTimer<=0){shoot();shootTimer=currentWeapon==='smg'?0.07:currentWeapon==='ak'?0.11:0.2;}
+    if(shootTimer<=0){
+      shoot();
+      const w = getWeapon(currentWeapon);
+      shootTimer = w.fireRate || 0.2;
+    }
   }
   renderer.render(scene,camera);
 }
