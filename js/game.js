@@ -435,13 +435,46 @@ function updateChar(dt){
   else robe.material.color.setHex(0x111111);
 }
 
-function shoot(){
+// Raycaster برای شلیک به نقطه کلیک‌شده
+const raycaster = new THREE.Raycaster();
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // صفحه زمین y=0
+const aimTarget = new THREE.Vector3(0, 0.6, -10); // نقطه هدف پیش‌فرض
+
+function getClickWorldPosition(clientX, clientY) {
+  const mouseNDC = new THREE.Vector2(
+    (clientX / innerWidth) * 2 - 1,
+    -(clientY / innerHeight) * 2 + 1
+  );
+  raycaster.setFromCamera(mouseNDC, camera);
+  const target = new THREE.Vector3();
+  const hit = raycaster.ray.intersectPlane(groundPlane, target);
+  if (hit) {
+    target.y = 0.6; // کمی بالاتر از زمین
+    return target;
+  }
+  // اگر به زمین نخورد، نقطه جلو دوربین
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  return camera.position.clone().add(dir.multiplyScalar(18));
+}
+
+function shoot(clientX, clientY) {
   const weapon = getWeapon(currentWeapon);
   if (weapon.isMelee) return;
 
-  const dir = new THREE.Vector3();
-  camera.getWorldDirection(dir);
-  const origin = camera.position.clone().add(dir.clone().multiplyScalar(1.2));
+  // آپدیت نقطه هدف اگر مختصات داده شده
+  if (clientX !== undefined && clientY !== undefined) {
+    aimTarget.copy(getClickWorldPosition(clientX, clientY));
+  }
+
+  // مبدأ شلیک کمی جلو دوربین
+  const camDir = new THREE.Vector3();
+  camera.getWorldDirection(camDir);
+  const origin = camera.position.clone().add(camDir.multiplyScalar(1.4));
+  origin.y = Math.max(origin.y, 1.3);
+
+  // جهت دقیقاً به سمت نقطه کلیک‌شده
+  const dir = aimTarget.clone().sub(origin).normalize();
   const speed = weapon.speed;
   const count = weapon.count || 1;
 
@@ -449,27 +482,27 @@ function shoot(){
     for (let i = 0; i < count; i++) {
       const spread = new THREE.Vector3(
         (Math.random() - 0.5) * (weapon.spread || 0.035),
-        (Math.random() - 0.5) * 0.05,
+        (Math.random() - 0.5) * 0.04,
         (Math.random() - 0.5) * (weapon.spread || 0.035)
       );
       const d = dir.clone().add(spread).normalize();
       const mesh = createProjectileMesh('bullet');
       mesh.position.copy(origin);
       scene.add(mesh);
-      projectiles.push({ type: currentWeapon, mesh, vel: d.multiplyScalar(speed), life: 1.3 });
+      projectiles.push({ type: currentWeapon, mesh, vel: d.multiplyScalar(speed), life: 1.4 });
     }
   } else {
     const mesh = createProjectileMesh(currentWeapon);
     mesh.position.copy(origin);
     scene.add(mesh);
     const d = dir.clone();
-    d.y += 0.06;
+    d.y += 0.03;
     d.normalize();
     projectiles.push({
       type: currentWeapon,
       mesh,
-      vel: d.multiplyScalar(speed * 0.65),
-      life: 2.1,
+      vel: d.multiplyScalar(speed * 0.72),
+      life: 2.3,
       rotSpeed: (Math.random() - 0.5) * 7
     });
   }
@@ -577,23 +610,35 @@ function updateCamera(dt){
   camera.lookAt(target);
 }
 
-window.addEventListener('mousemove',e=>{mouse.x=(e.clientX/innerWidth)*2-1;mouse.y=-(e.clientY/innerHeight)*2+1;});
+window.addEventListener('mousemove',e=>{
+  mouse.x=(e.clientX/innerWidth)*2-1;
+  mouse.y=-(e.clientY/innerHeight)*2+1;
+  // موقع نگه داشتن موس، نقطه هدف رو دنبال کن
+  if(shooting) aimTarget.copy(getClickWorldPosition(e.clientX, e.clientY));
+});
 window.addEventListener('mousedown',e=>{
   if(e.target.closest('.wpn')||e.target.closest('#modeBtn')||e.target.closest('#joystick'))return;
   shooting=true;
-  if(!getWeapon(currentWeapon).isMelee) shoot();
+  if(!getWeapon(currentWeapon).isMelee) shoot(e.clientX, e.clientY);
 });
 window.addEventListener('mouseup',()=>{shooting=false;});
 window.addEventListener('touchstart',e=>{
   if(e.target.closest('.wpn')||e.target.closest('#modeBtn')||e.target.closest('#joystick'))return;
-  e.preventDefault();shooting=true;
-  const t=e.touches[0];mouse.x=(t.clientX/innerWidth)*2-1;mouse.y=-(t.clientY/innerHeight)*2+1;
-  if(!getWeapon(currentWeapon).isMelee) shoot();
+  e.preventDefault();
+  shooting=true;
+  const t=e.touches[0];
+  mouse.x=(t.clientX/innerWidth)*2-1;
+  mouse.y=-(t.clientY/innerHeight)*2+1;
+  if(!getWeapon(currentWeapon).isMelee) shoot(t.clientX, t.clientY);
 },{passive:false});
 window.addEventListener('touchmove',e=>{
   if(e.target.closest('#joystick'))return;
   e.preventDefault();
-  const t=e.touches[0];mouse.x=(t.clientX/innerWidth)*2-1;mouse.y=-(t.clientY/innerHeight)*2+1;
+  const t=e.touches[0];
+  mouse.x=(t.clientX/innerWidth)*2-1;
+  mouse.y=-(t.clientY/innerHeight)*2+1;
+  // موقع نگه داشتن انگشت، نقطه هدف رو آپدیت کن
+  if(shooting) aimTarget.copy(getClickWorldPosition(t.clientX, t.clientY));
 },{passive:false});
 window.addEventListener('touchend',()=>{shooting=false;});
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
