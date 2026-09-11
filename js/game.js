@@ -460,8 +460,13 @@ function updateChar(dt){
   else robe.material.color.setHex(0x111111);
 }
 
-// ========== منطق شلیک (الهام از نسخه ۲ بعدی) ==========
-// پرتابه از نقطه کلیک شروع می‌شود و به سمت آخوند پرواز می‌کند
+// ========== منطق شلیک (سازگار با ۳ بعدی + حس نسخه ۲ بعدی) ==========
+// ایده نسخه ۲ بعدی: پرتابه از محل کلیک شروع می‌شود و به سمت آخوند می‌رود.
+// در ۳ بعدی:
+//   ۱. نقطه کلیک روی زمین با Raycast گرفته می‌شود
+//   ۲. پرتابه کمی بالاتر از زمین در همان نقطه ساخته می‌شود
+//   ۳. اگر نقطه خیلی نزدیک آخوند باشد، مبدأ کمی عقب‌تر گذاشته می‌شود تا فوراً برخورد نکند
+//   ۴. جهت به سمت مرکز بدن آخوند است + کمی قوس برای سلاح‌های پرتابی
 
 function getClickWorldPosition(clientX, clientY) {
   const mouseNDC = new THREE.Vector2(
@@ -469,103 +474,126 @@ function getClickWorldPosition(clientX, clientY) {
     -(clientY / innerHeight) * 2 + 1
   );
   raycaster.setFromCamera(mouseNDC, camera);
+
   const target = new THREE.Vector3();
   if (raycaster.ray.intersectPlane(groundPlane, target)) {
-    target.y = 1.0; // کمی بالاتر از زمین
     return target;
   }
-  // فال‌بک: نقطه جلو دوربین
+
+  // فال‌بک: نقطه جلو دوربین روی ارتفاع مناسب
   const dir = new THREE.Vector3();
   camera.getWorldDirection(dir);
-  return camera.position.clone().add(dir.multiplyScalar(15)).setY(1.0);
+  return camera.position.clone().add(dir.multiplyScalar(14)).setY(0);
 }
 
 function shoot(clientX, clientY) {
   const weapon = getWeapon(currentWeapon);
   if (weapon.isMelee) return;
 
-  // نقطه کلیک روی زمین
+  // به‌روزرسانی نقطه کلیک
   if (clientX !== undefined && clientY !== undefined) {
     lastClickPos.copy(getClickWorldPosition(clientX, clientY));
   }
 
-  // مبدأ = نقطه کلیک
-  const origin = lastClickPos.clone();
+  // هدف = مرکز تقریبی بدن آخوند
+  const targetPos = char.pos.clone().add(new THREE.Vector3(0, 1.35, 0));
 
-  // جهت = از نقطه کلیک به سمت آخوند (مثل نسخه ۲ بعدی)
-  const targetPos = char.pos.clone().add(new THREE.Vector3(0, 1.3, 0));
+  // مبدأ = نقطه کلیک (کمی بالاتر از زمین)
+  let origin = lastClickPos.clone();
+  origin.y = 0.9;
+
+  // اگر خیلی نزدیک آخوند بود، مبدأ را کمی دورتر ببر تا پرتابه جا برای حرکت داشته باشد
+  const toTarget = targetPos.clone().sub(origin);
+  const dist = toTarget.length();
+  if (dist < 2.5) {
+    // از سمت دوربین یک مقدار عقب‌تر بساز
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+    camDir.y = 0;
+    camDir.normalize();
+    origin.copy(char.pos).addScaledVector(camDir, -3.5);
+    origin.y = 1.1;
+  }
+
+  // جهت نهایی به سمت آخوند
   const dir = targetPos.clone().sub(origin).normalize();
-
-  const speed = weapon.speed;
+  const speed = weapon.speed || 14;
   const count = weapon.count || 1;
+  const isBullet = weapon.projectileType === 'bullet';
 
-  if (weapon.projectileType === 'bullet') {
-    for (let i = 0; i < count; i++) {
-      const spread = new THREE.Vector3(
-        (Math.random() - 0.5) * (weapon.spread || 0.06),
-        (Math.random() - 0.5) * 0.05,
-        (Math.random() - 0.5) * (weapon.spread || 0.06)
-      );
-      const d = dir.clone().add(spread).normalize();
-      const mesh = createProjectileMesh('bullet');
-      mesh.position.copy(origin);
-      scene.add(mesh);
-      projectiles.push({
-        type: currentWeapon,
-        mesh,
-        vel: d.multiplyScalar(speed),
-        life: 1.5
-      });
+  for (let i = 0; i < count; i++) {
+    // پخش جزئی برای اسلحه‌های رگباری
+    const spreadAmount = weapon.spread || (isBullet ? 0.04 : 0.02);
+    const spread = new THREE.Vector3(
+      (Math.random() - 0.5) * spreadAmount,
+      (Math.random() - 0.5) * spreadAmount * 0.6,
+      (Math.random() - 0.5) * spreadAmount
+    );
+
+    const d = dir.clone().add(spread).normalize();
+
+    // قوس ملایم فقط برای پرتابه‌های غیرگلوله
+    if (!isBullet) {
+      d.y += 0.14;
+      d.normalize();
     }
-  } else {
-    const mesh = createProjectileMesh(currentWeapon);
+
+    const mesh = createProjectileMesh(isBullet ? 'bullet' : currentWeapon);
     mesh.position.copy(origin);
     scene.add(mesh);
 
-    // کمی قوس به بالا برای حس پرتاب
-    const d = dir.clone();
-    d.y += 0.12;
-    d.normalize();
+    // جهت‌دهی اولیه مش (برای نیزه و مشابه)
+    if (mesh.lookAt) {
+      const lookTarget = origin.clone().add(d);
+      mesh.lookAt(lookTarget);
+    }
 
     projectiles.push({
       type: currentWeapon,
       mesh,
-      vel: d.multiplyScalar(speed * 0.85),
-      life: 2.4,
-      rotSpeed: (Math.random() - 0.5) * 8
+      vel: d.multiplyScalar(isBullet ? speed : speed * 0.82),
+      life: isBullet ? 1.4 : 2.3,
+      rotSpeed: isBullet ? 0 : (Math.random() - 0.5) * 9,
+      isBullet
     });
   }
 }
 
 function updateProjectiles(dt) {
+  const hitPos = char.pos.clone().add(new THREE.Vector3(0, 1.35, 0));
+
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
 
     // گرانش فقط برای پرتابه‌های غیرگلوله
-    if (p.type !== 'colt' && p.type !== 'smg' && p.type !== 'ak') {
-      p.vel.y -= 14 * dt;
+    if (!p.isBullet) {
+      p.vel.y -= 13 * dt;
     }
 
     p.mesh.position.addScaledVector(p.vel, dt);
 
+    // چرخش برای حس پرتاب
     if (p.rotSpeed) {
       p.mesh.rotation.x += p.rotSpeed * dt;
-      p.mesh.rotation.z += p.rotSpeed * 0.6 * dt;
+      p.mesh.rotation.z += p.rotSpeed * 0.5 * dt;
     }
 
     p.life -= dt;
 
     // برخورد با آخوند
-    const hitPos = char.pos.clone().add(new THREE.Vector3(0, 1.3, 0));
-    if (p.mesh.position.distanceTo(hitPos) < char.radius + 0.7) {
+    if (p.mesh.position.distanceTo(hitPos) < char.radius + 0.65) {
       hitChar(p.type);
       scene.remove(p.mesh);
       projectiles.splice(i, 1);
       continue;
     }
 
-    // حذف پرتابه‌های خارج از محدوده
-    if (p.life <= 0 || p.mesh.position.y < -2 || p.mesh.position.distanceTo(char.pos) > 80) {
+    // حذف در صورت خارج شدن از محدوده یا تمام شدن عمر
+    if (
+      p.life <= 0 ||
+      p.mesh.position.y < -2 ||
+      p.mesh.position.distanceTo(char.pos) > 90
+    ) {
       scene.remove(p.mesh);
       projectiles.splice(i, 1);
     }
