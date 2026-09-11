@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+<title>آخوند فراری ۳بعدی • شهر</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="game"></div>
+<div id="crosshair"></div>
+<div id="ui">
+  <h1>آخوند فراری ۳بعدی • شهر</h1>
+  <div id="stats">
+    <span>امتیاز: <b id="score">0</b></span>
+    <span>سطح: <b id="level">1</b></span>
+  </div>
+</div>
+<div id="hits">ضربه: <span id="hitCount">0</span></div>
+<div id="combo">COMBO ×<span id="comboNum">1</span>!</div>
+<div id="titleBadge"></div>
+<div id="msg"></div>
+<button id="modeBtn">🎮 کنترل آخوند</button>
+<div id="joystick"><div id="joyKnob"></div></div>
+<div id="hint">کلیک = شلیک • دکمه بالا = تعویض حالت</div>
+<div id="weapons"></div>
+
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js"}}
+</script>
+<script type="module" src="js/game.js"></script>
+</body>
+</html>
