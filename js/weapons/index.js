@@ -10,10 +10,11 @@ import banana from './banana.js';
 import rock from './rock.js';
 import tomato from './tomato.js';
 import egg from './egg.js';
+import dildo from './dildo.js';
 
 export const WEAPONS = [
   whip, colt, smg, ak, slipper, poop,
-  spear, hammer, banana, rock, tomato, egg
+  spear, hammer, banana, rock, tomato, egg, dildo
 ];
 
 export const WEAPON_MAP = Object.fromEntries(
