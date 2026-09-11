@@ -337,10 +337,22 @@ function updatePeds(dt){
 
 // Projectiles & whip
 const projectiles=[], particlePool=[];
-const whipPoints=[],whipMeshes=[];
-for(let i=0;i<12;i++){
-  const m=new THREE.Mesh(new THREE.SphereGeometry(0.07-i*0.003,6,6),new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(0.08,0.5,0.32-i*0.015)}));
-  m.visible=false;scene.add(m);whipMeshes.push(m);whipPoints.push(new THREE.Vector3());
+const WHIP_SEGMENTS = 14;
+const whipPoints = [];
+const whipMeshes = [];
+for (let i = 0; i < WHIP_SEGMENTS; i++) {
+  const t = i / (WHIP_SEGMENTS - 1);
+  const m = new THREE.Mesh(
+    new THREE.SphereGeometry(0.09 - t * 0.045, 8, 8),
+    new THREE.MeshStandardMaterial({
+      color: new THREE.Color().setHSL(0.08, 0.55, 0.35 - t * 0.12),
+      roughness: 0.7
+    })
+  );
+  m.visible = false;
+  scene.add(m);
+  whipMeshes.push(m);
+  whipPoints.push(new THREE.Vector3());
 }
 function spawnParticles(pos,color,count=12){
   for(let i=0;i<count;i++){
@@ -612,59 +624,73 @@ function updateProjectiles(dt) {
 
 function updateWhip(dt) {
   const active = currentWeapon === 'whip' && !freeMode;
-  const hitPos = new THREE.Vector3(char.pos.x, char.pos.y + 1.4, char.pos.z);
+  const hitPos = new THREE.Vector3(char.pos.x, char.pos.y + 1.45, char.pos.z);
 
-  // شلاق قابل کنترل با موس/دوربین (مثل نسخه اصلی)
-  // نوک دنبال جهت نگاه است، نه دنبال آخوند
+  // ----- دسته شلاق نزدیک دوربین -----
+  const handle = camera.position.clone();
+  const look = new THREE.Vector3();
+  camera.getWorldDirection(look);
+  // کمی پایین و جلو تا از وسط صفحه شروع شود
+  handle.addScaledVector(look, 1.2);
+  handle.y -= 0.4;
+
+  // ----- نوک شلاق: جهت نگاه + نقطه موس -----
   let tipTarget;
   if (active) {
-    const dir = new THREE.Vector3();
-    camera.getWorldDirection(dir);
+    // نقطه اصلی: جلو دوربین در جهت نگاه
+    tipTarget = camera.position.clone().addScaledVector(look, 9.5);
 
-    // پرتاب نوک به جلو در جهت نگاه
-    const reach = 8.5;
-    tipTarget = camera.position.clone().addScaledVector(dir, reach);
+    // موس روی زمین را با ارتفاع مناسب ترکیب کن (نه روی خود زمین)
+    const mouseAim = lastClickPos.clone();
+    mouseAim.y = 1.3;
+    tipTarget.lerp(mouseAim, 0.5);
 
-    // تأثیر نقطه موس روی زمین برای کنترل دقیق‌تر
-    const clickAim = lastClickPos.clone();
-    clickAim.y = Math.max(0.5, Math.min(clickAim.y + 1.0, 4.5));
-    tipTarget.lerp(clickAim, 0.45);
-
-    tipTarget.y = Math.max(0.35, Math.min(tipTarget.y, 5.5));
+    // ارتفاع معقول
+    tipTarget.y = Math.max(0.6, Math.min(tipTarget.y, 4.8));
   } else {
-    tipTarget = camera.position.clone();
-    tipTarget.y = 0.35;
+    tipTarget = handle.clone().addScaledVector(look, 2);
+    tipTarget.y = Math.max(0.4, tipTarget.y);
   }
 
-  // حرکت نرم نوک
-  whipPoints[0].lerp(tipTarget, active ? 0.42 : 0.2);
+  // نرم کردن حرکت نوک
+  if (!updateWhip._smoothTip) updateWhip._smoothTip = tipTarget.clone();
+  updateWhip._smoothTip.lerp(tipTarget, active ? 0.35 : 0.15);
+  const tip = updateWhip._smoothTip;
 
-  // زنجیره شلاق
-  for (let i = 1; i < 12; i++) {
-    const prev = whipPoints[i - 1];
-    const curr = whipPoints[i];
-    const diff = curr.clone().sub(prev);
-    const len = diff.length() || 0.001;
-    const segLen = 0.50;
-    diff.multiplyScalar(segLen / len);
-    curr.copy(prev).add(diff);
-    curr.y -= 1.0 * dt;
-    if (curr.y < 0.1) curr.y = 0.1;
-  }
+  // ----- قرار دادن مهره‌ها روی مسیر دسته → نوک (با کمی قوس) -----
+  for (let i = 0; i < WHIP_SEGMENTS; i++) {
+    const t = i / (WHIP_SEGMENTS - 1); // 0 = دسته ، 1 = نوک
+    // درون‌یابی خطی
+    const x = handle.x + (tip.x - handle.x) * t;
+    const z = handle.z + (tip.z - handle.z) * t;
+    // قوس ملایم به پایین در وسط شلاق
+    const baseY = handle.y + (tip.y - handle.y) * t;
+    const sag = Math.sin(t * Math.PI) * 0.55;
+    const y = baseY - sag;
 
-  for (let i = 0; i < 12; i++) {
+    // نرم به موقعیت جدید
+    whipPoints[i].x += (x - whipPoints[i].x) * 0.55;
+    whipPoints[i].y += (y - whipPoints[i].y) * 0.55;
+    whipPoints[i].z += (z - whipPoints[i].z) * 0.55;
+
     whipMeshes[i].position.copy(whipPoints[i]);
     whipMeshes[i].visible = active;
   }
 
-  // فقط وقتی بازیکن شلاق را روی آخوند گرفته باشد می‌زند
+  // ----- برخورد: نوک و چند مهره آخر -----
   if (active) {
-    const tip = whipPoints[0];
-    const dx = tip.x - hitPos.x;
-    const dy = tip.y - hitPos.y;
-    const dz = tip.z - hitPos.z;
-    if (dx * dx + dy * dy + dz * dz < (char.radius + 0.9) * (char.radius + 0.9)) {
-      hitChar('whip');
+    const radius = char.radius + 1.0;
+    const r2 = radius * radius;
+    // چک کردن ۴ مهره آخر برای برخورد بهتر
+    for (let i = WHIP_SEGMENTS - 4; i < WHIP_SEGMENTS; i++) {
+      const p = whipPoints[i];
+      const dx = p.x - hitPos.x;
+      const dy = p.y - hitPos.y;
+      const dz = p.z - hitPos.z;
+      if (dx * dx + dy * dy + dz * dz < r2) {
+        hitChar('whip');
+        break;
+      }
     }
   }
 }
