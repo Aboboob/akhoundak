@@ -21,6 +21,11 @@ let currentWeapon='whip', shooting=false, shootTimer=0;
 let mouse={x:0,y:0}, freeMode=false;
 let joy={active:false, dx:0, dy:0}; // -1..1
 
+// برای شلیک و فرار از نقطه کلیک
+const raycaster = new THREE.Raycaster();
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const lastClickPos = new THREE.Vector3(0, 1, 0);
+
 WEAPONS.forEach(w=>{
   const b=document.createElement('button');
   b.className='wpn'+(w.id==='whip'?' active':'');
@@ -351,18 +356,15 @@ function updateChar(dt){
 
   if(char.stunTimer>0){
     char.stunTimer-=dt;
-    char.vel.x*=0.88;char.vel.z*=0.88;
+    char.vel.x*=0.84;char.vel.z*=0.84;
   }else if(freeMode){
-    // Joystick + keyboard, camera-relative movement (more natural)
-    let jx=joy.dx, jy=-joy.dy; // invert screen Y so up = forward
+    // حالت کنترل مستقیم (بازیکن کنترل می‌کند)
+    let jx=joy.dx, jy=-joy.dy; // بالا = جلو
     if(keys.w)jy+=1;if(keys.s)jy-=1;if(keys.a)jx-=1;if(keys.d)jx+=1;
     const jlen=Math.hypot(jx,jy);
     if(jlen>1){jx/=jlen;jy/=jlen;}
 
     if(jlen>0.08){
-      // move relative to camera yaw
-      const camYaw=Math.atan2(camera.position.x-char.pos.x,camera.position.z-char.pos.z);
-      // forward is opposite to camera-to-char for third person feel, or use camera look dir
       const look=new THREE.Vector3();
       camera.getWorldDirection(look);
       look.y=0;look.normalize();
@@ -373,40 +375,63 @@ function updateChar(dt){
       move.addScaledVector(right,jx);
       if(move.lengthSq()>0.001){
         move.normalize();
-        const speed=8.2;
+        const speed=8.5;
         char.vel.x=move.x*speed;
         char.vel.z=move.z*speed;
         const targetFacing=Math.atan2(move.x,move.z);
         let diff=targetFacing-char.facing;
         while(diff>Math.PI)diff-=Math.PI*2;
         while(diff<-Math.PI)diff+=Math.PI*2;
-        char.facing+=diff*Math.min(1,dt*12);
+        char.facing+=diff*Math.min(1,dt*10);
       }
     }else{
-      char.vel.x*=0.82;
-      char.vel.z*=0.82;
+      // توقف سریع‌تر (کمتر سر می‌خورد)
+      char.vel.x*=0.76;
+      char.vel.z*=0.76;
     }
   }else{
-    // Flee mode
-    const camDir=new THREE.Vector3();camera.getWorldDirection(camDir);
-    const aim=camera.position.clone().add(camDir.multiplyScalar(16));
-    const toChar=char.pos.clone().sub(aim);toChar.y=0;
-    const dist=Math.max(toChar.length(),1.5);
+    // ========== حالت فرار: از آخرین نقطه کلیک فرار می‌کند ==========
+    const threat = lastClickPos.clone();
+    threat.y = 0;
+    const toChar = char.pos.clone().sub(threat);
+    toChar.y = 0;
+    const dist = Math.max(toChar.length(), 1.2);
     toChar.normalize();
-    const force=(10/dist+1.0+level*0.12)*6;
-    char.vel.x+=toChar.x*force*dt;
-    char.vel.z+=toChar.z*force*dt;
-    char.vel.x+=(Math.random()-0.5)*2.2*dt*(1+level*0.12);
-    char.vel.z+=(Math.random()-0.5)*2.2*dt*(1+level*0.12);
-    if(Math.random()<0.005+level*0.0007){char.vel.x*=-1.05;char.vel.z*=-1.05;}
-    if(Math.random()<0.004)char.vel.y=5+Math.random()*2.5;
-    const maxSpd=5.8+level*0.4;
-    const hSpd=Math.hypot(char.vel.x,char.vel.z);
-    if(hSpd>maxSpd){char.vel.x=(char.vel.x/hSpd)*maxSpd;char.vel.z=(char.vel.z/hSpd)*maxSpd;}
-    if(hSpd>0.25){
-      const tf=Math.atan2(char.vel.x,char.vel.z);
-      let d=tf-char.facing;while(d>Math.PI)d-=Math.PI*2;while(d<-Math.PI)d+=Math.PI*2;
-      char.facing+=d*Math.min(1,dt*8);
+
+    // نیروی فرار (قوی‌تر وقتی نزدیک‌تر باشد)
+    const force = (12 / dist + 1.3 + level * 0.15) * 5.5;
+    char.vel.x += toChar.x * force * dt;
+    char.vel.z += toChar.z * force * dt;
+
+    // کمی تصادفی برای حس طبیعی
+    char.vel.x += (Math.random() - 0.5) * 1.8 * dt * (1 + level * 0.1);
+    char.vel.z += (Math.random() - 0.5) * 1.8 * dt * (1 + level * 0.1);
+
+    // گاهی تغییر جهت ناگهانی
+    if (Math.random() < 0.004 + level * 0.0006) {
+      char.vel.x *= -1.1;
+      char.vel.z *= -1.1;
+    }
+    // گاهی پرش
+    if (Math.random() < 0.0035) {
+      char.vel.y = 5 + Math.random() * 2.8;
+    }
+
+    // محدود کردن حداکثر سرعت
+    const maxSpd = 5.5 + level * 0.38;
+    const hSpd = Math.hypot(char.vel.x, char.vel.z);
+    if (hSpd > maxSpd) {
+      char.vel.x = (char.vel.x / hSpd) * maxSpd;
+      char.vel.z = (char.vel.z / hSpd) * maxSpd;
+    }
+
+    // چرخش صورت به سمت حرکت
+    if (hSpd > 0.3) {
+      const tf = Math.atan2(char.vel.x, char.vel.z);
+      let d = tf - char.facing;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      char.facing += d * Math.min(1, dt * 7);
     }
   }
 
@@ -437,9 +462,6 @@ function updateChar(dt){
 
 // ========== منطق شلیک (الهام از نسخه ۲ بعدی) ==========
 // پرتابه از نقطه کلیک شروع می‌شود و به سمت آخوند پرواز می‌کند
-const raycaster = new THREE.Raycaster();
-const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-const lastClickPos = new THREE.Vector3(0, 1, 0);
 
 function getClickWorldPosition(clientX, clientY) {
   const mouseNDC = new THREE.Vector2(
