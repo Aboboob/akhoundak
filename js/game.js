@@ -435,10 +435,11 @@ function updateChar(dt){
   else robe.material.color.setHex(0x111111);
 }
 
-// Raycaster برای شلیک به نقطه کلیک‌شده
+// ========== منطق شلیک (الهام از نسخه ۲ بعدی) ==========
+// پرتابه از نقطه کلیک شروع می‌شود و به سمت آخوند پرواز می‌کند
 const raycaster = new THREE.Raycaster();
-const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // صفحه زمین y=0
-const aimTarget = new THREE.Vector3(0, 0.6, -10); // نقطه هدف پیش‌فرض
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const lastClickPos = new THREE.Vector3(0, 1, 0);
 
 function getClickWorldPosition(clientX, clientY) {
   const mouseNDC = new THREE.Vector2(
@@ -447,79 +448,105 @@ function getClickWorldPosition(clientX, clientY) {
   );
   raycaster.setFromCamera(mouseNDC, camera);
   const target = new THREE.Vector3();
-  const hit = raycaster.ray.intersectPlane(groundPlane, target);
-  if (hit) {
-    target.y = 0.6; // کمی بالاتر از زمین
+  if (raycaster.ray.intersectPlane(groundPlane, target)) {
+    target.y = 1.0; // کمی بالاتر از زمین
     return target;
   }
-  // اگر به زمین نخورد، نقطه جلو دوربین
+  // فال‌بک: نقطه جلو دوربین
   const dir = new THREE.Vector3();
   camera.getWorldDirection(dir);
-  return camera.position.clone().add(dir.multiplyScalar(18));
+  return camera.position.clone().add(dir.multiplyScalar(15)).setY(1.0);
 }
 
 function shoot(clientX, clientY) {
   const weapon = getWeapon(currentWeapon);
   if (weapon.isMelee) return;
 
-  // آپدیت نقطه هدف اگر مختصات داده شده
+  // نقطه کلیک روی زمین
   if (clientX !== undefined && clientY !== undefined) {
-    aimTarget.copy(getClickWorldPosition(clientX, clientY));
+    lastClickPos.copy(getClickWorldPosition(clientX, clientY));
   }
 
-  // مبدأ شلیک کمی جلو دوربین
-  const camDir = new THREE.Vector3();
-  camera.getWorldDirection(camDir);
-  const origin = camera.position.clone().add(camDir.multiplyScalar(1.4));
-  origin.y = Math.max(origin.y, 1.3);
+  // مبدأ = نقطه کلیک
+  const origin = lastClickPos.clone();
 
-  // جهت دقیقاً به سمت نقطه کلیک‌شده
-  const dir = aimTarget.clone().sub(origin).normalize();
+  // جهت = از نقطه کلیک به سمت آخوند (مثل نسخه ۲ بعدی)
+  const targetPos = char.pos.clone().add(new THREE.Vector3(0, 1.3, 0));
+  const dir = targetPos.clone().sub(origin).normalize();
+
   const speed = weapon.speed;
   const count = weapon.count || 1;
 
   if (weapon.projectileType === 'bullet') {
     for (let i = 0; i < count; i++) {
       const spread = new THREE.Vector3(
-        (Math.random() - 0.5) * (weapon.spread || 0.035),
-        (Math.random() - 0.5) * 0.04,
-        (Math.random() - 0.5) * (weapon.spread || 0.035)
+        (Math.random() - 0.5) * (weapon.spread || 0.06),
+        (Math.random() - 0.5) * 0.05,
+        (Math.random() - 0.5) * (weapon.spread || 0.06)
       );
       const d = dir.clone().add(spread).normalize();
       const mesh = createProjectileMesh('bullet');
       mesh.position.copy(origin);
       scene.add(mesh);
-      projectiles.push({ type: currentWeapon, mesh, vel: d.multiplyScalar(speed), life: 1.4 });
+      projectiles.push({
+        type: currentWeapon,
+        mesh,
+        vel: d.multiplyScalar(speed),
+        life: 1.5
+      });
     }
   } else {
     const mesh = createProjectileMesh(currentWeapon);
     mesh.position.copy(origin);
     scene.add(mesh);
+
+    // کمی قوس به بالا برای حس پرتاب
     const d = dir.clone();
-    d.y += 0.03;
+    d.y += 0.12;
     d.normalize();
+
     projectiles.push({
       type: currentWeapon,
       mesh,
-      vel: d.multiplyScalar(speed * 0.72),
-      life: 2.3,
-      rotSpeed: (Math.random() - 0.5) * 7
+      vel: d.multiplyScalar(speed * 0.85),
+      life: 2.4,
+      rotSpeed: (Math.random() - 0.5) * 8
     });
   }
 }
 
-function updateProjectiles(dt){
-  for(let i=projectiles.length-1;i>=0;i--){
-    const p=projectiles[i];
-    p.vel.y-=11*dt;p.mesh.position.addScaledVector(p.vel,dt);
-    if(p.rotSpeed)p.mesh.rotation.x+=p.rotSpeed*dt;
-    p.life-=dt;
-    const hitPos=char.pos.clone().add(new THREE.Vector3(0,1.4,0));
-    if(p.mesh.position.distanceTo(hitPos)<char.radius+0.55){
-      hitChar(p.type);scene.remove(p.mesh);projectiles.splice(i,1);continue;
+function updateProjectiles(dt) {
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+
+    // گرانش فقط برای پرتابه‌های غیرگلوله
+    if (p.type !== 'colt' && p.type !== 'smg' && p.type !== 'ak') {
+      p.vel.y -= 14 * dt;
     }
-    // also hit npcs lightly (visual only for now)
-    if(p.life<=0||p.mesh.position.y<-3){scene.remove(p.mesh);projectiles.splice(i,1);}
+
+    p.mesh.position.addScaledVector(p.vel, dt);
+
+    if (p.rotSpeed) {
+      p.mesh.rotation.x += p.rotSpeed * dt;
+      p.mesh.rotation.z += p.rotSpeed * 0.6 * dt;
+    }
+
+    p.life -= dt;
+
+    // برخورد با آخوند
+    const hitPos = char.pos.clone().add(new THREE.Vector3(0, 1.3, 0));
+    if (p.mesh.position.distanceTo(hitPos) < char.radius + 0.7) {
+      hitChar(p.type);
+      scene.remove(p.mesh);
+      projectiles.splice(i, 1);
+      continue;
+    }
+
+    // حذف پرتابه‌های خارج از محدوده
+    if (p.life <= 0 || p.mesh.position.y < -2 || p.mesh.position.distanceTo(char.pos) > 80) {
+      scene.remove(p.mesh);
+      projectiles.splice(i, 1);
+    }
   }
 }
 
@@ -610,37 +637,37 @@ function updateCamera(dt){
   camera.lookAt(target);
 }
 
-window.addEventListener('mousemove',e=>{
-  mouse.x=(e.clientX/innerWidth)*2-1;
-  mouse.y=-(e.clientY/innerHeight)*2+1;
-  // موقع نگه داشتن موس، نقطه هدف رو دنبال کن
-  if(shooting) aimTarget.copy(getClickWorldPosition(e.clientX, e.clientY));
+window.addEventListener('mousemove', e => {
+  mouse.x = (e.clientX / innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+  // موقع نگه داشتن موس، نقطه کلیک رو آپدیت کن
+  if (shooting) lastClickPos.copy(getClickWorldPosition(e.clientX, e.clientY));
 });
-window.addEventListener('mousedown',e=>{
-  if(e.target.closest('.wpn')||e.target.closest('#modeBtn')||e.target.closest('#joystick'))return;
-  shooting=true;
-  if(!getWeapon(currentWeapon).isMelee) shoot(e.clientX, e.clientY);
+window.addEventListener('mousedown', e => {
+  if (e.target.closest('.wpn') || e.target.closest('#modeBtn') || e.target.closest('#joystick')) return;
+  shooting = true;
+  if (!getWeapon(currentWeapon).isMelee) shoot(e.clientX, e.clientY);
 });
-window.addEventListener('mouseup',()=>{shooting=false;});
-window.addEventListener('touchstart',e=>{
-  if(e.target.closest('.wpn')||e.target.closest('#modeBtn')||e.target.closest('#joystick'))return;
+window.addEventListener('mouseup', () => { shooting = false; });
+window.addEventListener('touchstart', e => {
+  if (e.target.closest('.wpn') || e.target.closest('#modeBtn') || e.target.closest('#joystick')) return;
   e.preventDefault();
-  shooting=true;
-  const t=e.touches[0];
-  mouse.x=(t.clientX/innerWidth)*2-1;
-  mouse.y=-(t.clientY/innerHeight)*2+1;
-  if(!getWeapon(currentWeapon).isMelee) shoot(t.clientX, t.clientY);
-},{passive:false});
-window.addEventListener('touchmove',e=>{
-  if(e.target.closest('#joystick'))return;
+  shooting = true;
+  const t = e.touches[0];
+  mouse.x = (t.clientX / innerWidth) * 2 - 1;
+  mouse.y = -(t.clientY / innerHeight) * 2 + 1;
+  if (!getWeapon(currentWeapon).isMelee) shoot(t.clientX, t.clientY);
+}, { passive: false });
+window.addEventListener('touchmove', e => {
+  if (e.target.closest('#joystick')) return;
   e.preventDefault();
-  const t=e.touches[0];
-  mouse.x=(t.clientX/innerWidth)*2-1;
-  mouse.y=-(t.clientY/innerHeight)*2+1;
-  // موقع نگه داشتن انگشت، نقطه هدف رو آپدیت کن
-  if(shooting) aimTarget.copy(getClickWorldPosition(t.clientX, t.clientY));
-},{passive:false});
-window.addEventListener('touchend',()=>{shooting=false;});
+  const t = e.touches[0];
+  mouse.x = (t.clientX / innerWidth) * 2 - 1;
+  mouse.y = -(t.clientY / innerHeight) * 2 + 1;
+  // موقع نگه داشتن انگشت، نقطه کلیک رو آپدیت کن
+  if (shooting) lastClickPos.copy(getClickWorldPosition(t.clientX, t.clientY));
+}, { passive: false });
+window.addEventListener('touchend', () => { shooting = false; });
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
 
 const clock=new THREE.Clock();
